@@ -1,56 +1,61 @@
 /**
- * 数据层：壁纸列表来自 Picsum 官方接口 https://picsum.photos/v2/list（实时请求、分页）。
- * 接口只提供 id / 作者 / 尺寸，标题、分类、热度等字段由 id 确定性生成，保证同一张图信息稳定。
- * 后端就绪后：把 lib/api.ts 里的接口地址换掉、并按真实字段调整 mapPicsumItem 即可。
+ * 数据层：壁纸列表来自 wallhaven.cc 官方 API（经 /api/wallhaven 代理）。
+ * 所有字段均为接口真实数据：分类、分辨率、浏览/收藏数、日期、文件大小、主色调。
+ * 后端就绪后：把 lib/api.ts 的接口地址换掉、按真实字段调整 mapWallhavenItem 即可。
  */
 
-export type CategoryId = "nature" | "city" | "architecture" | "abstract" | "minimal" | "night";
+export type CategoryId = "general" | "anime" | "people";
 export type Orientation = "landscape" | "portrait" | "square";
-export type ResClass = "2K" | "4K" | "5K";
+export type SortId = "random" | "new" | "favorites";
 
 export interface Wallpaper {
-  id: number; // Picsum 图片 id
-  title: string;
+  id: string; // wallhaven 壁纸 id，如 "qrow67"
   category: CategoryId;
-  orientation: Orientation;
-  ratio: number; // 宽 / 高
-  resClass: ResClass;
-  author: string;
-  downloads: number;
-  likes: number;
-  createdAt: string; // ISO 日期
-  tags: string[];
-  origW: number;
-  origH: number;
-}
-
-/** Picsum /v2/list 的原始条目 */
-export interface PicsumItem {
-  id: string;
-  author: string;
+  purity: string;
   width: number;
   height: number;
-  url: string;
-  download_url: string;
+  ratio: number; // 宽 / 高
+  views: number;
+  favorites: number;
+  createdAt: string;
+  fileType: string; // 如 image/png
+  fileSize: number; // 字节
+  colors: string[]; // 主色调
+  fullPath: string; // 原图（w.wallhaven.cc，带 CORS，可流式下载）
 }
 
-export const CATEGORIES: { id: CategoryId | "all"; label: string }[] = [
-  { id: "all", label: "全部" },
-  { id: "nature", label: "自然" },
-  { id: "city", label: "城市" },
-  { id: "architecture", label: "建筑" },
-  { id: "abstract", label: "抽象" },
-  { id: "minimal", label: "极简" },
-  { id: "night", label: "夜色" },
+/** wallhaven /api/v1/search 返回的原始条目 */
+export interface WallhavenItem {
+  id: string;
+  url: string;
+  views: number;
+  favorites: number;
+  source: string;
+  purity: string;
+  category: string;
+  dimension_x: number;
+  dimension_y: number;
+  resolution: string;
+  ratio: string;
+  file_size: number;
+  file_type: string;
+  created_at: string;
+  colors: string[];
+  path: string;
+  thumbs: { large: string; original: string; small: string };
+}
+
+export const CATEGORIES: { id: CategoryId | "all"; label: string; code: string }[] = [
+  { id: "all", label: "全部", code: "111" },
+  { id: "general", label: "通用", code: "100" },
+  { id: "anime", label: "动漫", code: "010" },
+  { id: "people", label: "人物", code: "001" },
 ];
 
 export const CATEGORY_LABEL: Record<CategoryId, string> = {
-  nature: "自然",
-  city: "城市",
-  architecture: "建筑",
-  abstract: "抽象",
-  minimal: "极简",
-  night: "夜色",
+  general: "通用",
+  anime: "动漫",
+  people: "人物",
 };
 
 export const ORIENTATION_LABEL: Record<Orientation, string> = {
@@ -59,94 +64,78 @@ export const ORIENTATION_LABEL: Record<Orientation, string> = {
   square: "方形",
 };
 
-/* ---------- 由 id 确定性生成的演示字段 ---------- */
-
-const CATEGORY_ORDER: CategoryId[] = ["nature", "city", "architecture", "abstract", "minimal", "night"];
-
-const TITLE_BANK: Record<CategoryId, [string[], string[]]> = {
-  nature: [
-    ["山雾", "湖面", "松风", "暮色", "雪线", "晨雾", "海岸", "溪谷", "云影", "旷野"],
-    ["未散", "微光", "之上", "深处", "低语", "尽头", "来信", "初醒"],
-  ],
-  city: [
-    ["霓虹", "天桥", "街灯", "幕墙", "地铁", "车流", "巷口", "夜市"],
-    ["雨夜", "之后", "末班", "六点", "折射", "灯火"],
-  ],
-  architecture: [
-    ["楼梯", "拱门", "立面", "走廊", "廊柱", "穹顶", "天井"],
-    ["几何", "光影", "之下", "序列", "留白"],
-  ],
-  abstract: [
-    ["流体", "色谱", "噪点", "波纹", "光斑", "折叠"],
-    ["实验", "运动", "梦境", "演算"],
-  ],
-  minimal: [
-    ["留白", "单色", "线条", "灰阶", "白墙"],
-    ["练习", "研究", "之间", "独处"],
-  ],
-  night: [
-    ["银河", "星轨", "月光", "萤火", "夜色", "灯塔"],
-    ["铁轨", "海岸", "之森", "长曝光"],
-  ],
+export const SORTINGS: Record<SortId, { label: string; api: string }> = {
+  random: { label: "随机", api: "random" },
+  new: { label: "最新", api: "date_added" },
+  favorites: { label: "收藏最多", api: "favorites" },
 };
 
-function orientationOf(ratio: number): Orientation {
-  if (ratio >= 1.15) return "landscape";
-  if (ratio <= 0.87) return "portrait";
+/** 分类 id → wallhaven categories 参数（三位开关：通用/动漫/人物） */
+export function categoryCode(id: CategoryId | "all"): string {
+  return CATEGORIES.find((c) => c.id === id)?.code ?? "111";
+}
+
+export function orientationOf(w: Wallpaper): Orientation {
+  const r = w.width / w.height;
+  if (r >= 1.15) return "landscape";
+  if (r <= 0.87) return "portrait";
   return "square";
 }
 
-function resClassOf(width: number): ResClass {
-  if (width >= 4500) return "5K";
-  if (width >= 2600) return "4K";
-  return "2K";
+/** 分辨率档位（按真实宽度） */
+export function resClassOf(w: Wallpaper): string {
+  if (w.width >= 5000) return "5K";
+  if (w.width >= 3800) return "4K";
+  if (w.width >= 2500) return "2K";
+  if (w.width >= 1900) return "1080P";
+  return "HD";
 }
 
-/** 接口条目 → 站内壁纸模型（同一 id 永远生成相同信息） */
-export function mapPicsumItem(item: PicsumItem): Wallpaper {
-  const id = Number.parseInt(item.id, 10) || 0;
-  const ratio = item.width / item.height;
-  const category = CATEGORY_ORDER[id % CATEGORY_ORDER.length];
-  const [heads, tails] = TITLE_BANK[category];
-  const title = heads[(id * 7 + 2) % heads.length] + tails[(id * 3 + 5) % tails.length];
-  const daysAgo = (id * 11) % 200;
+export function mapWallhavenItem(item: WallhavenItem): Wallpaper {
   return {
-    id,
-    title,
-    category,
-    orientation: orientationOf(ratio),
-    ratio: Math.round(ratio * 1000) / 1000,
-    resClass: resClassOf(item.width),
-    author: item.author,
-    downloads: 400 + ((id * 3709) % 42000),
-    likes: 60 + ((id * 137) % 3800),
-    createdAt: new Date(Date.UTC(2026, 8, 29) - daysAgo * 86400000).toISOString().slice(0, 10),
-    tags: [CATEGORY_LABEL[category], title],
-    origW: item.width,
-    origH: item.height,
+    id: item.id,
+    category: (["general", "anime", "people"].includes(item.category) ? item.category : "general") as CategoryId,
+    purity: item.purity,
+    width: item.dimension_x,
+    height: item.dimension_y,
+    ratio: item.dimension_x / item.dimension_y,
+    views: item.views,
+    favorites: item.favorites,
+    createdAt: item.created_at,
+    fileType: item.file_type,
+    fileSize: item.file_size,
+    colors: item.colors ?? [],
+    fullPath: item.path,
   };
 }
 
-/* ---------- 图片 URL（按 id 请求原始尺寸，实时加载） ---------- */
+/* ---------- 图片 URL ---------- */
 
-const base = (id: number) => `https://picsum.photos/id/${id}`;
-
-/** 卡片缩略图（宽固定 600，高按比例） */
+/** 卡片缩略图（经代理流式加载，支持进度环；路径与 CDN 同构便于纯前缀代理） */
 export function thumbUrl(w: Wallpaper): string {
-  return `${base(w.id)}/600/${Math.round(600 / w.ratio)}`;
+  return `/api/wallhaven-thumb/lg/${w.id.slice(0, 2)}/${w.id}.jpg`;
 }
 
-/** 灯箱预览图（约 1280px 级别） */
+/** 代理不可用时的兜底直连（<img> 不需要 CORS） */
+export function thumbFallbackUrl(w: Wallpaper): string {
+  return `https://th.wallhaven.cc/lg/${w.id.slice(0, 2)}/${w.id}.jpg`;
+}
+
+/** 灯箱预览图（orig 档缩略图，全分辨率 JPG，经代理流式加载） */
 export function previewUrl(w: Wallpaper): string {
-  const width = w.ratio >= 1 ? 1280 : Math.round(1280 * w.ratio);
-  return `${base(w.id)}/${width}/${Math.round(width / w.ratio)}`;
+  return `/api/wallhaven-thumb/orig/${w.id.slice(0, 2)}/${w.id}.jpg`;
 }
 
-/** 下载用原图（接口返回的原始尺寸） */
+export function previewFallbackUrl(w: Wallpaper): string {
+  return `https://th.wallhaven.cc/orig/${w.id.slice(0, 2)}/${w.id}.jpg`;
+}
+
+/** 下载原图（w.wallhaven.cc 带 CORS，浏览器可直连流式下载） */
 export function downloadUrl(w: Wallpaper): string {
-  return `${base(w.id)}/${w.origW}/${w.origH}`;
+  return w.fullPath;
 }
 
 export function downloadFilename(w: Wallpaper): string {
-  return `lumen-${String(w.id).padStart(3, "0")}-${w.resClass}.jpg`;
+  const ext = w.fileType.split("/")[1] ?? "jpg";
+  return `wallhaven-${w.id}.${ext}`;
 }

@@ -2,17 +2,20 @@ import { useEffect, useMemo, useState } from "react";
 import { CaretDown, Images, MagnifyingGlass, WarningCircle } from "@phosphor-icons/react";
 import {
   CATEGORIES,
-  CATEGORY_LABEL,
+  SORTINGS,
+  categoryCode,
+  orientationOf,
   type CategoryId,
   type Orientation,
+  type SortId,
   type Wallpaper,
 } from "../data/wallpapers";
-import { fetchFirstNonEmptyPage, randomPage, wrapPage } from "../lib/api";
+import { fetchGalleryPage, randomSeed, type GalleryQuery } from "../lib/api";
 import { useColumnCount, useMasonryColumns } from "../hooks/useMasonry";
 import { cn } from "../lib/utils";
 import { WallpaperCard } from "./WallpaperCard";
 
-const PAGE_SIZE = 30; // 与接口每页条数对齐：一次请求一整页、完整展示
+const PAGE_SIZE = 24; // wallhaven 每页 24 张，请求多少展示多少
 type OrientationFilter = Orientation | "all";
 
 const SKELETON_RATIOS = [0.75, 1.6, 1, 0.5625, 1.5, 0.8, 1.778, 0.667, 0.75, 1.6, 1, 1.5];
@@ -80,39 +83,56 @@ interface Props {
 }
 
 export function GallerySection({ onOpen }: Props) {
-  // 按页存储（页内已按当前排序排好）；pages 为 null 表示首页还在请求中。
-  // 每次刷新从随机页开始，加载更多向后环绕翻页，整库循环完才到底。
-  const [pages, setPages] = useState<Wallpaper[][] | null>(null);
-  const [pageSeq, setPageSeq] = useState<number[]>([]);
-  const [nextPage, setNextPage] = useState(1);
+  // 服务端筛选条件（变化即重查第一页）
+  const [category, setCategory] = useState<CategoryId | "all">("all");
+  const [sort, setSort] = useState<SortId>("random");
+  const [queryInput, setQueryInput] = useState("");
+  const [query, setQuery] = useState("");
+  // 会话级随机种子：每次刷新一个新的，随机排序下整套壁纸都不同
+  const [sessionSeed] = useState(() => randomSeed());
+
+  // 客户端筛选（作用于已加载数据）
+  const [orientation, setOrientation] = useState<OrientationFilter>("all");
+
+  // 分页状态
+  const [pages, setPages] = useState<Wallpaper[][] | null>(null); // null = 首页加载中
+  const [pageNo, setPageNo] = useState(1);
+  const [activeSeed, setActiveSeed] = useState<string | null>(null);
+  const [lastPage, setLastPage] = useState(1);
   const [error, setError] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [exhausted, setExhausted] = useState(false);
-
-  const [category, setCategory] = useState<CategoryId | "all">("all");
-  const [orientation, setOrientation] = useState<OrientationFilter>("all");
-  const [query, setQuery] = useState("");
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
-  // 起始页在组件生命周期内只抽一次；放在 state 初始化器里，
-  // 避免 StrictMode 双执行 effect 时各抽一个随机页、发出两次不同请求
-  const [startPage] = useState(() => randomPage());
 
-  const q = query.trim().toLowerCase();
-  const filterKey = `${category}|${orientation}|${q}`;
+  // 搜索防抖
+  useEffect(() => {
+    const timer = setTimeout(() => setQuery(queryInput.trim()), 400);
+    return () => clearTimeout(timer);
+  }, [queryInput]);
 
-  /** 页内排序：按 id 倒序（picsum 的 id 即入库顺序，id 大 = 较新入库，真实可依） */
-  const sortPage = useMemo(() => (list: Wallpaper[]) => [...list].sort((a, b) => b.id - a.id), []);
+  const galleryQuery = useMemo<GalleryQuery>(
+    () => ({
+      q: query,
+      categories: categoryCode(category),
+      sorting: SORTINGS[sort].api,
+      seed: sort === "random" ? sessionSeed : null,
+    }),
+    [query, category, sort, sessionSeed],
+  );
+  const queryKey = `${galleryQuery.q}|${galleryQuery.categories}|${galleryQuery.sorting}|${galleryQuery.seed}`;
 
-  // 首屏：从随机页开始请求（startPage 固定，StrictMode 双执行会命中请求去重）
+  // 查询条件变化 → 重置并请求第一页
   useEffect(() => {
     let cancelled = false;
     setError(false);
-    fetchFirstNonEmptyPage(startPage)
-      .then(({ page, list }) => {
+    setPages(null);
+    setPageNo(1);
+    fetchGalleryPage(galleryQuery, 1)
+      .then((result) => {
         if (cancelled) return;
-        setPages([sortPage(list)]);
-        setPageSeq([page]);
-        setNextPage(wrapPage(page));
+        setPages([result.list]);
+        setActiveSeed(result.seed);
+        setLastPage(Math.max(1, result.lastPage));
+        setVisibleCount(PAGE_SIZE);
       })
       .catch(() => {
         if (!cancelled) setError(true);
@@ -120,26 +140,14 @@ export function GallerySection({ onOpen }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [startPage]);
+  }, [queryKey, galleryQuery]);
 
   const loaded = pages?.flat() ?? [];
 
+  // 方向筛选在客户端做（作用于已加载页）
   const filtered = useMemo(() => {
-    const match = (x: Wallpaper) =>
-      (category === "all" || x.category === category) &&
-      (orientation === "all" || x.orientation === orientation) &&
-      (!q ||
-        x.title.toLowerCase().includes(q) ||
-        x.author.toLowerCase().includes(q) ||
-        x.tags.some((t) => t.toLowerCase().includes(q)) ||
-        CATEGORY_LABEL[x.category].includes(q));
-    return (pages ?? []).flatMap((p) => sortPage(p).filter(match));
-  }, [pages, category, orientation, q, sortPage]);
-
-  // 筛选条件变化时回到第一屏
-  useEffect(() => {
-    setVisibleCount(PAGE_SIZE);
-  }, [filterKey]);
+    return orientation === "all" ? loaded : loaded.filter((w) => orientationOf(w) === orientation);
+  }, [loaded, orientation]);
 
   const shown = filtered.slice(0, visibleCount);
 
@@ -148,40 +156,37 @@ export function GallerySection({ onOpen }: Props) {
 
   // 卡片在 filtered 中的原始序号（灯箱导航依赖）
   const indexOf = useMemo(() => {
-    const m = new Map<number, number>();
+    const m = new Map<string, number>();
     filtered.forEach((w, i) => m.set(w.id, i));
     return m;
   }, [filtered]);
 
   const handleRetry = () => {
-    setPages(null);
     setError(false);
-    fetchFirstNonEmptyPage(randomPage())
-      .then(({ page, list }) => {
-        setPages([sortPage(list)]);
-        setPageSeq([page]);
-        setNextPage(wrapPage(page));
+    setPages(null);
+    fetchGalleryPage(galleryQuery, 1)
+      .then((result) => {
+        setPages([result.list]);
+        setActiveSeed(result.seed);
+        setLastPage(Math.max(1, result.lastPage));
+        setVisibleCount(PAGE_SIZE);
       })
       .catch(() => setError(true));
   };
 
   const handleLoadMore = async () => {
-    // 本地还有未展示的（筛选后）先直接展开
+    // 本地还有未展示的（方向筛选后）先直接展开
     if (visibleCount < filtered.length) {
       setVisibleCount((c) => c + PAGE_SIZE);
       return;
     }
-    // 整库循环完毕（下一页已加载过）才到底
-    if (loadingMore || exhausted || pageSeq.includes(nextPage)) {
-      setExhausted(true);
-      return;
-    }
+    if (loadingMore || pageNo >= lastPage) return;
     setLoadingMore(true);
     try {
-      const { page, list } = await fetchFirstNonEmptyPage(nextPage);
-      setPages((prev) => [...(prev ?? []), sortPage(list)]);
-      setPageSeq((prev) => [...prev, page]);
-      setNextPage(wrapPage(page));
+      const next = pageNo + 1;
+      const result = await fetchGalleryPage({ ...galleryQuery, seed: activeSeed }, next);
+      setPages((prev) => [...(prev ?? []), result.list]);
+      setPageNo(next);
       setVisibleCount((c) => c + PAGE_SIZE);
     } catch {
       // 加载更多失败不打断页面，按钮仍在，用户可重试
@@ -192,10 +197,13 @@ export function GallerySection({ onOpen }: Props) {
 
   const handleReset = () => {
     setCategory("all");
-    setOrientation("all");
+    setSort("random");
+    setQueryInput("");
     setQuery("");
+    setOrientation("all");
   };
 
+  const exhausted = pageNo >= lastPage;
   const moreAvailable = visibleCount < filtered.length || !exhausted;
 
   return (
@@ -205,7 +213,7 @@ export function GallerySection({ onOpen }: Props) {
           <h2 className="font-display text-2xl font-semibold tracking-tight md:text-4xl">壁纸库</h2>
           <p className="text-sm text-zinc-500">
             {pages === null ? "加载中" : `已加载 ${loaded.length} 张`}
-            {q && <>，搜索 “{query.trim()}”</>}
+            {query && <>，搜索 “{query}”</>}
           </p>
         </div>
       </div>
@@ -240,9 +248,9 @@ export function GallerySection({ onOpen }: Props) {
               <MagnifyingGlass size={16} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-500" />
               <input
                 type="search"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="搜索壁纸、标签或作者"
+                value={queryInput}
+                onChange={(e) => setQueryInput(e.target.value)}
+                placeholder="搜索壁纸标签，如 mountain"
                 aria-label="搜索壁纸"
                 className="h-10 w-full rounded-full border border-white/10 bg-white/[0.04] pl-10 pr-4 text-sm text-zinc-100 placeholder:text-zinc-500 focus:border-cyan-300/60 focus:outline-none focus:ring-2 focus:ring-cyan-400/20"
               />
@@ -258,6 +266,12 @@ export function GallerySection({ onOpen }: Props) {
                 { value: "square", label: "方形" },
               ]}
             />
+            <Segmented
+              label="排序方式"
+              value={sort}
+              onChange={setSort}
+              options={(Object.keys(SORTINGS) as SortId[]).map((id) => ({ value: id, label: SORTINGS[id].label }))}
+            />
           </div>
         </div>
       </div>
@@ -269,7 +283,7 @@ export function GallerySection({ onOpen }: Props) {
             <WarningCircle size={44} className="text-zinc-700" />
             <div>
               <h3 className="text-lg font-medium text-zinc-300">壁纸列表加载失败</h3>
-              <p className="mt-1.5 text-sm text-zinc-500">无法连接 Picsum 接口，请检查网络后重试</p>
+              <p className="mt-1.5 text-sm text-zinc-500">无法连接壁纸接口，请检查网络后重试</p>
             </div>
             <button
               type="button"
@@ -295,7 +309,7 @@ export function GallerySection({ onOpen }: Props) {
             <div>
               <h3 className="text-lg font-medium text-zinc-300">没有找到匹配的壁纸</h3>
               <p className="mt-1.5 text-sm text-zinc-500">
-                换个关键词，或清除当前筛选条件试试（搜索范围：已加载的 {loaded.length} 张）
+                {query ? "换个关键词，或清除筛选条件试试" : "当前筛选条件下没有壁纸，试试清除筛选"}
               </p>
             </div>
             <button
@@ -311,7 +325,7 @@ export function GallerySection({ onOpen }: Props) {
         {!error && pages !== null && filtered.length > 0 && (
           <>
             {/* 瀑布流：JS 贪心分列（追加不重排），骨架块直接续在各列末尾，贴合新卡片的落位 */}
-            <div key={filterKey} className="mt-8 flex gap-3 md:mt-10 md:gap-4">
+            <div key={filterKeyOf(queryKey, orientation)} className="mt-8 flex gap-3 md:mt-10 md:gap-4">
               {columns.map((col, ci) => (
                 <div key={ci} className="flex min-w-0 flex-1 flex-col gap-3 md:gap-4">
                   {col.items.map((w) => (
@@ -340,11 +354,10 @@ export function GallerySection({ onOpen }: Props) {
                   <CaretDown size={15} weight="bold" />
                 </button>
               )}
-              {!loadingMore && moreAvailable && visibleCount >= filtered.length && !exhausted && (
-                <p className="text-xs text-zinc-600">还有更多壁纸</p>
-              )}
               {!loadingMore && !moreAvailable && loaded.length > PAGE_SIZE && (
-                <p className="text-xs text-zinc-600">已经到底了</p>
+                <p className="text-xs text-zinc-600">
+                  {query ? "没有更多结果了" : "已经到底了"}
+                </p>
               )}
             </div>
           </>
@@ -352,4 +365,9 @@ export function GallerySection({ onOpen }: Props) {
       </div>
     </section>
   );
+}
+
+/** 瀑布流容器的重挂载 key：服务端查询或方向筛选变化时触发入场编排 */
+function filterKeyOf(queryKey: string, orientation: string): string {
+  return `${queryKey}|${orientation}`;
 }

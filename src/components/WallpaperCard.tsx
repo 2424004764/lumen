@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
 import { motion, useReducedMotion } from "motion/react";
-import { CircleNotch, DownloadSimple } from "@phosphor-icons/react";
-import { ORIENTATION_LABEL, thumbUrl, type Wallpaper } from "../data/wallpapers";
+import { CircleNotch, DownloadSimple, Heart } from "@phosphor-icons/react";
+import { ORIENTATION_LABEL, orientationOf, resClassOf, thumbFallbackUrl, thumbUrl, type Wallpaper } from "../data/wallpapers";
 import { downloadWallpaper, fallbackDownload } from "../lib/download";
 import { loadThumbObjectUrl } from "../lib/thumb-cache";
 import { cn } from "../lib/utils";
@@ -57,8 +57,8 @@ export function WallpaperCard({ wallpaper: w, index, onOpen }: Props) {
       })
       .catch(() => {
         if (cancelled) return;
-        // 兜底：退回浏览器直接加载
-        setDisplaySrc(thumbUrl(w));
+        // 兜底：代理不可用时直连缩略图 CDN（<img> 无需 CORS）
+        setDisplaySrc(thumbFallbackUrl(w));
       });
     return () => {
       cancelled = true;
@@ -97,7 +97,7 @@ export function WallpaperCard({ wallpaper: w, index, onOpen }: Props) {
       transition={{ duration: 0.55, delay: Math.min(index, 7) * 0.05, ease: [0.16, 1, 0.3, 1] }}
       role="button"
       tabIndex={0}
-      aria-label={`查看壁纸「${w.title}」`}
+      aria-label="查看壁纸"
       onClick={onOpen}
       onKeyDown={handleKeydown}
       className="group relative cursor-zoom-in overflow-hidden rounded-2xl border border-white/[0.05] bg-zinc-900/60 outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/70"
@@ -115,7 +115,7 @@ export function WallpaperCard({ wallpaper: w, index, onOpen }: Props) {
         {displaySrc && (
           <img
             src={displaySrc}
-            alt={w.title}
+            alt={`${resClassOf(w)} ${ORIENTATION_LABEL[orientationOf(w)]}壁纸`}
             decoding="async"
             onLoad={() => setLoaded(true)}
             onError={() => setLoaded(true)}
@@ -126,12 +126,16 @@ export function WallpaperCard({ wallpaper: w, index, onOpen }: Props) {
           />
         )}
 
-        {/* 悬停信息层（只展示由接口尺寸算出的真实规格） */}
+        {/* 悬停信息层（真实规格：分辨率档位 / 方向，由接口尺寸算出） */}
         <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-zinc-950/85 via-zinc-950/25 to-transparent p-4 opacity-0 transition-opacity duration-300 group-hover:opacity-100">
           <figcaption className="translate-y-2 transition-transform duration-300 group-hover:translate-y-0">
             <p className="flex items-center gap-3 text-xs text-zinc-300/90">
-              <span className="font-display font-semibold text-cyan-200">{w.resClass}</span>
-              <span>{ORIENTATION_LABEL[w.orientation]}</span>
+              <span className="font-display font-semibold text-cyan-200">{resClassOf(w)}</span>
+              <span>{ORIENTATION_LABEL[orientationOf(w)]}</span>
+              <span className="inline-flex items-center gap-1">
+                <Heart size={12} weight="fill" className="text-rose-400/80" />
+                {w.favorites}
+              </span>
             </p>
           </figcaption>
         </div>
@@ -140,7 +144,7 @@ export function WallpaperCard({ wallpaper: w, index, onOpen }: Props) {
         <button
           type="button"
           onClick={handleQuickDownload}
-          aria-label={`下载「${w.title}」`}
+          aria-label="下载壁纸"
           className="absolute right-3 top-3 flex size-9 translate-y-[-6px] items-center justify-center rounded-full border border-white/15 bg-zinc-950/60 text-white opacity-0 backdrop-blur transition-all duration-300 hover:border-transparent hover:bg-cyan-400 hover:text-zinc-950 active:scale-95 group-hover:translate-y-0 group-hover:opacity-100"
         >
           {downloading ? (

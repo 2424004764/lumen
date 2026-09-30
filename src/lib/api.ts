@@ -1,70 +1,62 @@
-import { mapPicsumItem, type PicsumItem, type Wallpaper } from "../data/wallpapers";
+import { mapWallhavenItem, type WallhavenItem, type Wallpaper } from "../data/wallpapers";
 
-const API = "https://picsum.photos/v2/list";
-export const API_LIMIT = 30;
+/**
+ * 画廊查询（服务端执行：搜索 / 分类 / 排序 / 随机种子）
+ * 经 CF Pages Function 代理访问 wallhaven；结果按查询条件 + 页码缓存。
+ */
+const API = "/api/wallhaven";
 
-/** Picsum 全库页数（每页 30 张，共约 993 张图；超范围页返回空数组，由空页跳过逻辑兜底） */
-export const TOTAL_PAGES = 34;
-
-/** 随机起始页：每次刷新进入不同的壁纸集合 */
-export function randomPage(): number {
-  return 1 + Math.floor(Math.random() * TOTAL_PAGES);
+export interface GalleryQuery {
+  q: string;
+  categories: string; // "111" | "100" | "010" | "001"
+  sorting: string; // random | date_added | favorites | views
+  seed: string | null; // random 排序的会话种子（跨页保持同一随机序列）
 }
 
-/** 翻页环绕：最后一页之后回到第 1 页 */
-export function wrapPage(page: number): number {
-  return (page % TOTAL_PAGES) + 1;
+export interface PageResult {
+  list: Wallpaper[];
+  seed: string | null; // wallhaven 实际使用的种子（后续页要带上）
+  lastPage: number;
 }
 
-/** 从 from 页开始取第一个非空页（自动跳过空页并回绕），用于随机起点与环绕翻页 */
-export async function fetchFirstNonEmptyPage(from: number): Promise<{ page: number; list: Wallpaper[] }> {
-  let page = from;
-  for (let i = 0; i < TOTAL_PAGES; i++) {
-    const list = await fetchWallpapers(page);
-    if (list.length > 0) return { page, list };
-    page = wrapPage(page);
-  }
-  throw new Error("壁纸库无可用数据");
+const cache = new Map<string, Promise<PageResult>>();
+const inFlight = new Map<string, Promise<PageResult>>();
+
+export function randomSeed(): string {
+  const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+  return Array.from({ length: 6 }, () => chars[Math.floor(Math.random() * chars.length)]).join("");
 }
 
-/** 已加载分页缓存（Map 保持插入顺序，getCached 按页序展开） */
-const pages = new Map<number, Wallpaper[]>();
-/** 进行中的请求（并发去重，避免 StrictMode 双执行等场景重复请求同一页） */
-const inFlight = new Map<number, Promise<Wallpaper[]>>();
+export function fetchGalleryPage(query: GalleryQuery, page: number): Promise<PageResult> {
+  const params = new URLSearchParams();
+  if (query.q) params.set("q", query.q);
+  params.set("categories", query.categories);
+  params.set("sorting", query.sorting);
+  if (query.seed) params.set("seed", query.seed);
+  params.set("page", String(page));
 
-/** 请求一页壁纸列表；同一页并发只发一次请求，结果缓存复用 */
-export function fetchWallpapers(page: number): Promise<Wallpaper[]> {
-  const cached = pages.get(page);
-  if (cached) return Promise.resolve(cached);
+  const key = params.toString();
+  const cached = cache.get(key);
+  if (cached) return cached;
 
-  let pending = inFlight.get(page);
+  let pending = inFlight.get(key);
   if (!pending) {
-    pending = fetch(`${API}?page=${page}&limit=${API_LIMIT}`)
+    pending = fetch(`${API}?${key}`)
       .then(async (res) => {
         if (!res.ok) throw new Error(`壁纸列表请求失败：HTTP ${res.status}`);
-        const data: unknown = await res.json();
-        const list = (Array.isArray(data) ? data : []).map((raw) => mapPicsumItem(raw as PicsumItem));
-        pages.set(page, list);
-        return list;
+        const data = (await res.json()) as { data?: unknown; meta?: { seed?: string; last_page?: number } };
+        const list = (Array.isArray(data.data) ? data.data : []).map((raw) =>
+          mapWallhavenItem(raw as WallhavenItem),
+        );
+        return { list, seed: data.meta?.seed ?? null, lastPage: data.meta?.last_page ?? page };
       })
-      .finally(() => {
-        inFlight.delete(page);
+      .finally(() => inFlight.delete(key));
+    inFlight.set(key, pending);
+    pending
+      .then((result) => cache.set(key, Promise.resolve(result)))
+      .catch(() => {
+        /* 失败不缓存 */
       });
-    inFlight.set(page, pending);
   }
   return pending;
-}
-
-/** 已加载的全部壁纸（用于“随机一张”等场景） */
-export function getCached(): Wallpaper[] {
-  return [...pages.values()].flat();
-}
-
-/** 确保第一页可用（供随机入口在画廊未加载时兜底） */
-export async function ensureFirstPage(): Promise<Wallpaper[]> {
-  try {
-    return await fetchWallpapers(1);
-  } catch {
-    return [];
-  }
 }

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { AnimatePresence } from "motion/react";
 import type { Wallpaper } from "./data/wallpapers";
-import { ensureFirstPage, getCached } from "./lib/api";
+import { fetchGalleryPage, randomSeed } from "./lib/api";
 import { Footer } from "./components/Footer";
 import { GallerySection } from "./components/GallerySection";
 import { Hero } from "./components/Hero";
@@ -18,10 +18,18 @@ export default function App() {
   const [lightbox, setLightbox] = useState<LightboxState | null>(null);
 
   const openRandom = async () => {
-    const list = getCached().length > 0 ? getCached() : await ensureFirstPage();
-    if (list.length === 0) return;
-    const index = Math.floor(Math.random() * list.length);
-    setLightbox({ list, index });
+    try {
+      // 独立随机种子拉一页，从结果里随机抽一张
+      const result = await fetchGalleryPage(
+        { q: "", categories: "111", sorting: "random", seed: randomSeed() },
+        1,
+      );
+      if (result.list.length === 0) return;
+      const index = Math.floor(Math.random() * result.list.length);
+      setLightbox({ list: result.list, index });
+    } catch {
+      // 随机入口失败静默忽略，不打断页面
+    }
   };
 
   return (

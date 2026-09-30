@@ -1,7 +1,7 @@
 import { motion, useReducedMotion, useScroll, useTransform, type Variants } from "motion/react";
 import { ArrowDown, Shuffle } from "@phosphor-icons/react";
 
-const HERO_IMG = "https://picsum.photos/seed/lumen-neon-rain/1920/1080";
+const HERO_IMG = "https://th.wallhaven.cc/orig/5y/5y3xe7.jpg";
 
 const container: Variants = {
   hidden: {},

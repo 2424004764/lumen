@@ -46,7 +46,15 @@ export function Footer() {
               <ArrowSquareOut size={14} className="text-zinc-500" />
             </a>
             <p className="mt-2 text-xs leading-relaxed text-zinc-600">
-              壁纸数据与图片服务来自 Picsum
+              壁纸数据与图片服务来自{" "}
+              <a
+                href="https://wallhaven.cc"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="transition-colors hover:text-zinc-400"
+              >
+                wallhaven.cc
+              </a>
             </p>
           </div>
         </div>

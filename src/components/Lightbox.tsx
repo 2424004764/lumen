@@ -5,17 +5,23 @@ import {
   ArrowRight,
   CircleNotch,
   DownloadSimple,
+  Eye,
+  Heart,
   X,
 } from "@phosphor-icons/react";
 import {
+  CATEGORY_LABEL,
   ORIENTATION_LABEL,
   downloadFilename,
+  orientationOf,
+  previewFallbackUrl,
   previewUrl,
+  resClassOf,
   type Wallpaper,
 } from "../data/wallpapers";
 import { downloadWallpaper, fallbackDownload } from "../lib/download";
 import { fetchBlobWithProgress } from "../lib/progress";
-import { cn } from "../lib/utils";
+import { cn, formatBytes, formatCount, formatDate } from "../lib/utils";
 import { ProgressRing } from "./ProgressRing";
 import { useToast } from "./Toast";
 
@@ -87,8 +93,8 @@ export function Lightbox({ list, index, onClose, onIndexChange }: Props) {
       })
       .catch(() => {
         if (controller.signal.aborted) return;
-        // 兜底：流式读取不可用时退回浏览器直载
-        setDisplaySrc(previewUrl(w));
+        // 兜底：代理不可用时直连缩略图 CDN
+        setDisplaySrc(previewFallbackUrl(w));
       });
 
     return () => {
@@ -183,7 +189,7 @@ export function Lightbox({ list, index, onClose, onIndexChange }: Props) {
           <motion.img
             key={w.id}
             src={displaySrc}
-            alt={w.title}
+            alt={`${resClassOf(w)} ${ORIENTATION_LABEL[orientationOf(w)]}壁纸预览`}
             onLoad={() => setImgVisible(true)}
             initial={{ opacity: 0, scale: 0.965 }}
             animate={{ opacity: imgVisible ? 1 : 0, scale: 1 }}
@@ -222,11 +228,35 @@ export function Lightbox({ list, index, onClose, onIndexChange }: Props) {
         >
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-zinc-400">
-              <span>{ORIENTATION_LABEL[w.orientation]}</span>
-              <span className="font-display tabular-nums">
-                {w.origW} × {w.origH}
+              <span className="rounded-full border border-cyan-300/20 bg-cyan-400/10 px-2.5 py-0.5 text-cyan-300">
+                {CATEGORY_LABEL[w.category]}
               </span>
-              <span>{w.author}</span>
+              <span>{ORIENTATION_LABEL[orientationOf(w)]}</span>
+              <span className="font-display tabular-nums">
+                {w.width} × {w.height}
+              </span>
+              <span className="inline-flex items-center gap-1">
+                <Eye size={12} />
+                {formatCount(w.views)}
+              </span>
+              <span className="inline-flex items-center gap-1">
+                <Heart size={12} weight="fill" className="text-rose-400/80" />
+                {formatCount(w.favorites)}
+              </span>
+              <span>{formatDate(w.createdAt)}</span>
+              <span className="font-display tabular-nums">{formatBytes(w.fileSize)}</span>
+              {w.colors.length > 0 && (
+                <span className="inline-flex items-center gap-1" aria-label="主色调">
+                  {w.colors.slice(0, 5).map((c) => (
+                    <span
+                      key={c}
+                      className="size-3 rounded-full border border-white/15"
+                      style={{ backgroundColor: c }}
+                      title={c}
+                    />
+                  ))}
+                </span>
+              )}
             </div>
           </div>
 
@@ -244,7 +274,7 @@ export function Lightbox({ list, index, onClose, onIndexChange }: Props) {
             ) : (
               <>
                 <DownloadSimple size={17} weight="bold" />
-                下载 {w.resClass} 原图
+                下载 {resClassOf(w)} 原图
               </>
             )}
           </button>

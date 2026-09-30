@@ -1,0 +1,97 @@
+@import "tailwindcss";
+
+/*
+  主题锁定：全站深色（图库类产品，暗色衬托图片内容）
+  强调色：电光青 cyan（全站唯一强调色）
+  圆角体系：卡片/面板 rounded-2xl(16px)，按钮与筛选 pill 全圆角
+  z-index 层级：sticky 筛选栏 30 / 导航 40 / 灯箱 50 / 颗粒 60 / Toast 70
+*/
+
+@theme {
+  --font-sans:
+    "Space Grotesk Variable", ui-sans-serif, system-ui, -apple-system,
+    "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC",
+    sans-serif;
+}
+
+html {
+  color-scheme: dark;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  html {
+    scroll-behavior: smooth;
+  }
+}
+
+body {
+  @apply bg-zinc-950 text-zinc-100 antialiased;
+}
+
+::selection {
+  background: rgb(34 211 238 / 0.28);
+}
+
+/* 细滚动条，与深色主题一致 */
+body {
+  scrollbar-width: thin;
+  scrollbar-color: #3f3f46 transparent;
+}
+
+/* ---------- 动效 keyframes ---------- */
+
+@keyframes kenburns {
+  from {
+    transform: scale(1.02);
+  }
+  to {
+    transform: scale(1.12);
+  }
+}
+
+@keyframes shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+
+.animate-kenburns {
+  animation: kenburns 26s ease-in-out infinite alternate;
+}
+
+.skeleton-shimmer {
+  background: linear-gradient(
+    100deg,
+    rgb(255 255 255 / 0.04) 40%,
+    rgb(255 255 255 / 0.09) 50%,
+    rgb(255 255 255 / 0.04) 60%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.6s linear infinite;
+}
+
+/* 胶片颗粒（fixed + pointer-events-none，避免滚动容器重绘） */
+.grain {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix type='saturate' values='0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)' opacity='0.55'/></svg>");
+}
+
+@utility no-scrollbar {
+  &::-webkit-scrollbar {
+    display: none;
+  }
+  scrollbar-width: none;
+}
+
+/* ---------- 降级：偏好减少动效 ---------- */
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-kenburns {
+    animation: none;
+  }
+  .skeleton-shimmer {
+    animation: none;
+  }
+}
